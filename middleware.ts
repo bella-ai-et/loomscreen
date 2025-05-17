@@ -1,9 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { createClient } from "./lib/supabase/server";
 import aj, { createMiddleware, detectBot, shield } from "./lib/arcjet";
 
+const publicPaths = [
+  "/sign-in",
+  "/sign-up",
+  "/auth/callback",
+  "/api/auth",
+  "/_next",
+  "/favicon.ico",
+];
+
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  
+  // Skip middleware for public paths
+  if (publicPaths.some(path => pathname.startsWith(path))) {
+    return NextResponse.next();
+  }
+
   try {
     // First apply Arcjet validation
     const arcjetValidate = createMiddleware(validate);
@@ -13,13 +29,13 @@ export async function middleware(request: NextRequest) {
     }
 
     // Then check authentication
-    const headersList = headers();
-    const session = await auth.api.getSession({
-      headers: headersList,
-    });
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
 
     if (!session) {
-      return NextResponse.redirect(new URL("/sign-in", request.url));
+      const redirectUrl = new URL("/sign-in", request.url);
+      redirectUrl.searchParams.set("redirectedFrom", pathname);
+      return NextResponse.redirect(redirectUrl);
     }
 
     return NextResponse.next();

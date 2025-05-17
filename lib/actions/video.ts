@@ -281,11 +281,14 @@ export const getThumbnailUploadUrl = async (videoId: string) => {
 
 export const getVideoProcessingStatus = async (videoId: string) => {
   try {
+    const { supabase } = await getSupabaseClient();
+    
+    // Get video status from Bunny
     const response = await fetch(
       `${VIDEO_STREAM_BASE_URL}/library/${BUNNY_LIBRARY_ID}/videos/${videoId}`,
       {
         headers: {
-          'AccessKey': BUNNY_STREAM_ACCESS_KEY,
+          AccessKey: BUNNY_STREAM_ACCESS_KEY,
           'Content-Type': 'application/json',
         },
       }
@@ -296,14 +299,110 @@ export const getVideoProcessingStatus = async (videoId: string) => {
     }
 
     const data = await response.json();
-
-    return {
-      isProcessed: data.status === 4, // 4 means ready in Bunny Stream
-      encodingProgress: data.encodeProgress || 0,
-      status: data.status,
-    };
+    const isProcessed = data.status === 4; // 4 means processing is complete in Bunny
+    
+    // Update video status in Supabase if processing is complete
+    if (isProcessed) {
+      await supabase
+        .from('videos')
+        .update({ status: 'processed', duration: data.duration })
+        .eq('id', videoId);
+    }
+    
+    return { isProcessed, status: data.status };
   } catch (error) {
-    console.error('Error fetching video status:', error);
-    throw new Error('Failed to fetch video status');
+    console.error('Error getting video status:', error);
+    return { isProcessed: false, status: 'error' };
+  }
+};
+
+export const incrementVideoViews = async (videoId: string) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    
+    await supabase.rpc('increment_video_views', {
+      video_id: videoId
+    });
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error incrementing video views:', error);
+    return { success: false, error: 'Failed to increment video views' };
+  }
+};
+
+export const updateVideoVisibility = async (videoId: string, isPublic: boolean) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('videos')
+      .update({ is_public: isPublic })
+      .eq('id', videoId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    revalidatePaths(['/profile', '/video/[videoId]']);
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error updating video visibility:', error);
+    return { success: false, error: 'Failed to update video visibility' };
+  }
+};
+
+export const saveVideoDetails = async (videoId: string, details: {
+  title: string;
+  description?: string;
+  tags?: string[];
+  visibility: 'public' | 'private';
+}) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('videos')
+      .update({
+        title: details.title,
+        description: details.description || null,
+        tags: details.tags || [],
+        is_public: details.visibility === 'public',
+        status: 'ready'
+      })
+      .eq('id', videoId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    revalidatePaths(['/profile', '/video/[videoId]']);
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error saving video details:', error);
+    return { success: false, error: 'Failed to save video details' };
+  }
+};
+
+export const getAllVideosByUser = async (userId: string, options: VideoQueryOptions = {}) => {
+  return getUserVideos(userId, options);
+};
+
+export const getTranscript = async (videoId: string) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('transcripts')
+      .select('*')
+      .eq('video_id', videoId)
+      .single();
+    
+    if (error) throw error;
+    
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error getting transcript:', error);
+    return { success: false, error: 'Failed to get transcript' };
   }
 };

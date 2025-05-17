@@ -1,14 +1,33 @@
 import { EmptyState, Pagination, SharedHeader, VideoCard } from "@/components";
 import { getAllVideos } from "@/lib/actions/video";
+import { Video } from "@/types/video";
+import { Metadata } from "next";
 
-const page = async ({ searchParams }: SearchParams) => {
-  const { query, filter, page } = await searchParams;
+type SearchParams = {
+  query?: string;
+  filter?: string;
+  page?: string;
+};
 
-  const { videos, pagination } = await getAllVideos(
-    query,
-    filter,
-    Number(page) || 1
-  );
+export const metadata: Metadata = {
+  title: 'SnapCast - Video Library',
+  description: 'Browse and manage your video library',
+};
+
+const Page = async ({ searchParams }: { searchParams: SearchParams }) => {
+  const { query, filter, page } = searchParams;
+  const currentPage = Number(page) || 1;
+  const limit = 10;
+  const offset = (currentPage - 1) * limit;
+
+  const { videos, totalCount } = await getAllVideos({
+    searchQuery: query,
+    sortFilter: filter,
+    offset,
+    limit
+  });
+
+  const totalPages = Math.ceil(totalCount / limit);
 
   return (
     <main className="wrapper page">
@@ -16,18 +35,18 @@ const page = async ({ searchParams }: SearchParams) => {
 
       {videos?.length > 0 ? (
         <section className="video-grid">
-          {videos.map(({ video, user }) => (
+          {videos.map((video: Video) => (
             <VideoCard
               key={video.id}
-              id={video.videoId}
+              id={video.video_id}
               title={video.title}
-              thumbnail={video.thumbnailUrl}
-              createdAt={video.createdAt}
-              userImg={user?.image ?? ""}
-              username={user?.name ?? "Guest"}
+              thumbnail={video.thumbnail_url || ''}
+              createdAt={new Date(video.created_at)}
+              userImg={video.user?.image || ''}
+              username={video.user?.name || 'Guest'}
               views={video.views}
-              visibility={video.visibility}
-              duration={video.duration}
+              visibility={video.is_public ? 'public' : 'private'}
+              duration={0} // Duration not available in the current Video type
             />
           ))}
         </section>
@@ -39,16 +58,16 @@ const page = async ({ searchParams }: SearchParams) => {
         />
       )}
 
-      {pagination?.totalPages > 1 && (
+      {totalPages > 1 && (
         <Pagination
-          currentPage={pagination.currentPage}
-          totalPages={pagination.totalPages}
-          queryString={query}
-          filterString={filter}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          queryString={query || ''}
+          filterString={filter || ''}
         />
       )}
     </main>
   );
 };
 
-export default page;
+export default Page;

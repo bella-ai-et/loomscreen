@@ -2,12 +2,25 @@
 import { daysAgo } from "@/lib/utils";
 import { deleteVideo, updateVideoVisibility } from "@/lib/actions/video";
 import Image from "next/image";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authClient } from "@/lib/auth-client";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { visibilities } from "@/constants";
 import DropdownList from "./DropdownList";
 import ImageWithFallback from "./ImageWithFallback";
+
+interface VideoDetailHeaderProps {
+  title: string;
+  createdAt: string;
+  userImg: string;
+  username: string;
+  videoId: string;
+  ownerId: string;
+  visibility: string;
+  thumbnailUrl: string;
+}
+
+type Visibility = 'public' | 'private' | 'unlisted';
 
 const VideoDetailHeader = ({
   title,
@@ -25,10 +38,31 @@ const VideoDetailHeader = ({
     visibility as Visibility
   );
   const [isUpdating, setIsUpdating] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   const router = useRouter();
-  const { data: session } = authClient.useSession();
-  const userId = session?.user.id;
+  const supabase = createClientComponentClient();
   const isOwner = userId === ownerId;
+  
+  useEffect(() => {
+    const getSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUserId(session.user.id);
+      }
+    };
+    
+    getSession();
+    
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUserId(session.user.id);
+      } else {
+        setUserId(null);
+      }
+    });
+    
+    return () => subscription.unsubscribe();
+  }, [supabase.auth]);
 
   const handleDelete = async () => {
     try {

@@ -48,7 +48,7 @@ If you're getting started and need assistance or face any bugs, join our active 
 
 - **[Bunny.net](https://jsm.dev/snapcast-bunny)** is a developer-friendly video delivery platform offering global CDN, edge storage, adaptive streaming, and a customizable player. It simplifies video management with features like automatic encoding, token-based security, and real-time analytics. Ideal for seamless, secure, and scalable video streaming.
 
-- **[Better Auth](https://www.better-auth.com/)** is a TypeScript-first authentication and authorization library that simplifies implementing secure login, two-factor authentication, and social sign-ins, all while supporting multi-tenancy. 
+- **[Supabase Auth](https://supabase.com/auth)** provides secure authentication and user management out of the box, with support for email/password, social logins, and more. It's fully integrated with the Supabase ecosystem.
   
 - **[Drizzle ORM](https://orm.drizzle.team/)** is a type-safe, lightweight ORM for SQL databases, providing a modern solution for interacting with databases using TypeScript, supporting migrations, queries, and schema management.  
 
@@ -138,10 +138,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 # Google
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
-
-# BetterAuth
-BETTER_AUTH_SECRET=
-BETTER_AUTH_URL=http://localhost:3000
 
 # Bunny
 BUNNY_STORAGE_ACCESS_KEY=

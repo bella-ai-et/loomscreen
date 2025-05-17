@@ -1,11 +1,37 @@
 "use client";
 
+import { useEffect } from 'react';
 import Link from "next/link";
 import Image from "next/image";
-
-import { authClient } from "@/lib/auth-client";
+import { useRouter, useSearchParams } from 'next/navigation';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 const SignIn = () => {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const error = searchParams.get('error');
+  
+  useEffect(() => {
+    const checkSession = async () => {
+      const supabase = createClientComponentClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        router.push('/');
+      }
+    };
+    
+    checkSession();
+  }, [router]);
+  
+  const handleSignIn = async (provider: 'google' | 'github') => {
+    const supabase = createClientComponentClient();
+    await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/api/auth/callback`,
+      },
+    });
+  };
   return (
     <main className="sign-in">
       <aside className="testimonial">
@@ -71,18 +97,17 @@ const SignIn = () => {
 
           <button
             onClick={async () => {
-              return await authClient.signIn.social({
-                provider: "google",
-              });
+              return await handleSignIn('google');
             }}
+            className="flex-center gap-2 bg-dark-4 px-8 py-3 rounded-lg w-full"
           >
             <Image
               src="/assets/icons/google.svg"
-              alt="Google Icon"
-              width={22}
-              height={22}
+              alt="Google Logo"
+              width={20}
+              height={20}
             />
-            <span>Sign in with Google</span>
+            Continue with Google
           </button>
         </section>
       </aside>
