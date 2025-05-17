@@ -1,285 +1,309 @@
 "use server";
 
-import { db } from "@/drizzle/db";
-import { videos, user } from "@/drizzle/schema";
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import {apiFetch, doesTitleMatch, getEnv, getOrderByClause, withErrorHandling} from "@/lib/utils";
+import { createClient } from "@/lib/supabase/server";
+import { getEnv } from "@/lib/utils";
 import { BUNNY } from "@/constants";
-import aj, { fixedWindow, request } from "../arcjet";
+import { Video, CreateVideoInput, UpdateVideoInput, VideoQueryOptions } from "@/types/video";
 
-// Constants with full names
+// Constants
 const VIDEO_STREAM_BASE_URL = BUNNY.STREAM_BASE_URL;
-const THUMBNAIL_STORAGE_BASE_URL = BUNNY.STORAGE_BASE_URL;
-const THUMBNAIL_CDN_URL = BUNNY.CDN_URL;
 const BUNNY_LIBRARY_ID = getEnv("BUNNY_LIBRARY_ID");
-const ACCESS_KEYS = {
-  streamAccessKey: getEnv("BUNNY_STREAM_ACCESS_KEY"),
-  storageAccessKey: getEnv("BUNNY_STORAGE_ACCESS_KEY"),
-};
+const BUNNY_STREAM_ACCESS_KEY = getEnv("BUNNY_STREAM_ACCESS_KEY");
 
-const validateWithArcjet = async (fingerPrint: string) => {
-  const rateLimit = aj.withRule(
-    fixedWindow({
-      mode: "LIVE",
-      window: "1m",
-      max: 2,
-      characteristics: ["fingerprint"],
-    })
-  );
-  const req = await request();
-  const decision = await rateLimit.protect(req, { fingerprint: fingerPrint });
-  if (decision.isDenied()) {
-    throw new Error("Rate Limit Exceeded");
-  }
-};
-
-// Helper functions with descriptive names
+// Helper functions
 const revalidatePaths = (paths: string[]) => {
   paths.forEach((path) => revalidatePath(path));
 };
 
-const getSessionUserId = async (): Promise<string> => {
-  const session = await auth.api.getSession({ headers: await headers() });
+const getSupabaseClient = async () => {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Unauthenticated");
-  return session.user.id;
+  return { supabase, userId: session.user.id };
 };
 
-const buildVideoWithUserQuery = () =>
-  db
-    .select({
-      video: videos,
-      user: { id: user.id, name: user.name, image: user.image },
-    })
-    .from(videos)
-    .leftJoin(user, eq(videos.userId, user.id));
+// Video Actions
+export const getVideoUploadUrl = async () => {
+  try {
+    const { userId, supabase } = await getSupabaseClient();
+    
+    // Generate a unique video ID
+    const videoId = crypto.randomUUID();
+    
+    // Create a signed URL for direct upload to Bunny
+    const uploadUrl = `${VIDEO_STREAM_BASE_URL}/library/${BUNNY_LIBRARY_ID}/videos/${videoId}`;
+    
+    // Store video metadata in Supabase
+    const { data, error } = await supabase
+      .from('videos')
+      .insert([
+        { 
+          id: videoId,
+          user_id: userId,
+          title: 'Untitled Video',
+          is_public: false,
+          status: 'uploading'
+        }
+      ])
+      .select()
+      .single();
 
-// Server Actions
-export const getVideoUploadUrl = withErrorHandling(async () => {
-  await getSessionUserId();
-  const videoResponse = await apiFetch<BunnyVideoResponse>(
-    `${VIDEO_STREAM_BASE_URL}/${BUNNY_LIBRARY_ID}/videos`,
-    {
-      method: "POST",
-      bunnyType: "stream",
-      body: { title: "Temp Title", collectionId: "" },
-    }
-  );
+    if (error) throw error;
 
-  const uploadUrl = `${VIDEO_STREAM_BASE_URL}/${BUNNY_LIBRARY_ID}/videos/${videoResponse.guid}`;
-  return {
-    videoId: videoResponse.guid,
-    uploadUrl,
-    accessKey: ACCESS_KEYS.streamAccessKey,
-  };
-});
-
-export const getThumbnailUploadUrl = withErrorHandling(
-  async (videoId: string) => {
-    const timestampedFileName = `${Date.now()}-${videoId}-thumbnail`;
-    const uploadUrl = `${THUMBNAIL_STORAGE_BASE_URL}/thumbnails/${timestampedFileName}`;
-    const cdnUrl = `${THUMBNAIL_CDN_URL}/thumbnails/${timestampedFileName}`;
-
-    return {
+    return { 
+      videoId,
       uploadUrl,
-      cdnUrl,
-      accessKey: ACCESS_KEYS.storageAccessKey,
+      headers: {
+        'AccessKey': BUNNY_STREAM_ACCESS_KEY,
+        'Content-Type': 'application/octet-stream'
+      }
     };
+  } catch (error) {
+    console.error('Error generating upload URL:', error);
+    throw new Error('Failed to generate upload URL');
   }
-);
+};
 
-export const saveVideoDetails = withErrorHandling(
-  async (videoDetails: VideoDetails) => {
-    const userId = await getSessionUserId();
-    await validateWithArcjet(userId);
-    await apiFetch(
-      `${VIDEO_STREAM_BASE_URL}/${BUNNY_LIBRARY_ID}/videos/${videoDetails.videoId}`,
+export const createVideo = async (input: CreateVideoInput) => {
+  try {
+    const { userId, supabase } = await getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('videos')
+      .insert([
+        { 
+          ...input,
+          user_id: userId,
+          is_public: input.is_public ?? false,
+          status: 'processing'
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    revalidatePaths(['/dashboard', '/videos']);
+    return data as Video;
+  } catch (error) {
+    console.error('Error creating video:', error);
+    throw new Error('Failed to create video');
+  }
+};
+
+export const updateVideo = async (input: UpdateVideoInput) => {
+  try {
+    const { userId, supabase } = await getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('videos')
+      .update(input)
+      .eq('id', input.id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    revalidatePaths([`/videos/${input.id}`, '/dashboard', '/videos']);
+    return data as Video;
+  } catch (error) {
+    console.error('Error updating video:', error);
+    throw new Error('Failed to update video');
+  }
+};
+
+export const deleteVideo = async (videoId: string) => {
+  try {
+    const { userId, supabase } = await getSupabaseClient();
+    
+    // First, get the video to check ownership and get the video_id for Bunny
+    const { data: video, error: fetchError } = await supabase
+      .from('videos')
+      .select('*')
+      .eq('id', videoId)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError || !video) {
+      throw new Error('Video not found or access denied');
+    }
+
+    // Delete from Bunny (if needed)
+    // Note: You might want to implement this based on your Bunny CDN setup
+    
+    // Delete from Supabase
+    const { error: deleteError } = await supabase
+      .from('videos')
+      .delete()
+      .eq('id', videoId)
+      .eq('user_id', userId);
+
+    if (deleteError) throw deleteError;
+    
+    revalidatePaths(['/dashboard', '/videos']);
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting video:', error);
+    throw new Error('Failed to delete video');
+  }
+};
+
+export const getVideoById = async (videoId: string) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('videos')
+      .select('*, user:user_id(*)')
+      .eq('id', videoId)
+      .single();
+
+    if (error) throw error;
+    
+    // Increment view count
+    if (data) {
+      await supabase
+        .from('videos')
+        .update({ views: (data.views || 0) + 1 })
+        .eq('id', videoId);
+    }
+    
+    return data as Video;
+  } catch (error) {
+    console.error('Error fetching video:', error);
+    throw new Error('Video not found');
+  }
+};
+
+export const getAllVideos = async (options: VideoQueryOptions = {}) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    
+    let query = supabase
+      .from('videos')
+      .select('*, user:user_id(*)', { count: 'exact' })
+      .eq('is_public', true);
+    
+    // Apply search query if provided
+    if (options.searchQuery) {
+      query = query.ilike('title', `%${options.searchQuery}%`);
+    }
+    
+    // Apply sorting
+    const sortField = options.sortFilter?.split('-')[0] || 'created_at';
+    const sortOrder = options.sortFilter?.endsWith('-desc') ? 'desc' : 'desc';
+    
+    query = query.order(sortField, { ascending: sortOrder === 'asc' });
+    
+    // Apply pagination
+    const limit = options.limit || 10;
+    const offset = options.offset || 0;
+    query = query.range(offset, offset + limit - 1);
+    
+    const { data, error, count } = await query;
+    
+    if (error) throw error;
+    
+    return {
+      videos: data as Video[],
+      totalCount: count || 0
+    };
+  } catch (error) {
+    console.error('Error fetching videos:', error);
+    throw new Error('Failed to fetch videos');
+  }
+};
+
+export const getUserVideos = async (userId: string, options: VideoQueryOptions = {}) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    
+    let query = supabase
+      .from('videos')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId);
+    
+    // Apply search query if provided
+    if (options.searchQuery) {
+      query = query.ilike('title', `%${options.searchQuery}%`);
+    }
+    
+    // Apply sorting
+    const sortField = options.sortFilter?.split('-')[0] || 'created_at';
+    const sortOrder = options.sortFilter?.endsWith('-desc') ? 'desc' : 'desc';
+    
+    query = query.order(sortField, { ascending: sortOrder === 'asc' });
+    
+    // Apply pagination
+    const limit = options.limit || 10;
+    const offset = options.offset || 0;
+    query = query.range(offset, offset + limit - 1);
+    
+    const { data, error: queryError, count } = await query;
+    
+    if (queryError) throw queryError;
+    
+    return {
+      videos: data as Video[],
+      totalCount: count || 0
+    };
+  } catch (error) {
+    console.error('Error fetching user videos:', error);
+    throw new Error('Failed to fetch user videos');
+  }
+};
+
+export const getThumbnailUploadUrl = async (videoId: string) => {
+  try {
+    const { supabase } = await getSupabaseClient();
+    const timestamp = Date.now();
+    const fileName = `${timestamp}-${videoId}-thumbnail.jpg`;
+    
+    // Generate a signed URL for uploading the thumbnail
+    const { data, error } = await supabase.storage
+      .from('thumbnails')
+      .createSignedUploadUrl(fileName);
+
+    if (error) throw error;
+    
+    return {
+      uploadUrl: data.signedUrl,
+      filePath: fileName,
+      publicUrl: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/thumbnails/${fileName}`
+    };
+  } catch (error) {
+    console.error('Error generating thumbnail upload URL:', error);
+    throw new Error('Failed to generate thumbnail upload URL');
+  }
+};
+
+export const getVideoProcessingStatus = async (videoId: string) => {
+  try {
+    const response = await fetch(
+      `${VIDEO_STREAM_BASE_URL}/library/${BUNNY_LIBRARY_ID}/videos/${videoId}`,
       {
-        method: "POST",
-        bunnyType: "stream",
-        body: {
-          title: videoDetails.title,
-          description: videoDetails.description,
+        headers: {
+          'AccessKey': BUNNY_STREAM_ACCESS_KEY,
+          'Content-Type': 'application/json',
         },
       }
     );
 
-    const now = new Date();
-    await db.insert(videos).values({
-      ...videoDetails,
-      videoUrl: `${BUNNY.EMBED_URL}/${BUNNY_LIBRARY_ID}/${videoDetails.videoId}`,
-      userId,
-      createdAt: now,
-      updatedAt: now,
-    });
+    if (!response.ok) {
+      throw new Error('Failed to fetch video status');
+    }
 
-    revalidatePaths(["/"]);
-    return { videoId: videoDetails.videoId };
-  }
-);
-
-export const getAllVideos = withErrorHandling(async (
-  searchQuery: string = '',
-  sortFilter?: string,
-  pageNumber: number = 1,
-  pageSize: number = 8,
-) => {
-  const session = await auth.api.getSession({ headers: await headers() })
-  const currentUserId = session?.user.id;
-
-  const canSeeTheVideos = or(
-      eq(videos.visibility, 'public'),
-      eq(videos.userId, currentUserId!),
-  );
-
-  const whereCondition = searchQuery.trim()
-      ? and(
-          canSeeTheVideos,
-          doesTitleMatch(videos, searchQuery),
-      )
-      : canSeeTheVideos
-
-    // Count total for pagination
-    const [{ totalCount }] = await db
-      .select({ totalCount: sql<number>`count(*)` })
-      .from(videos)
-      .where(whereCondition);
-    const totalVideos = Number(totalCount || 0);
-    const totalPages = Math.ceil(totalVideos / pageSize);
-
-    // Fetch paginated, sorted results
-    const videoRecords = await buildVideoWithUserQuery()
-      .where(whereCondition)
-      .orderBy(
-        sortFilter
-          ? getOrderByClause(sortFilter)
-          : sql`${videos.createdAt} DESC`
-      )
-      .limit(pageSize)
-      .offset((pageNumber - 1) * pageSize);
+    const data = await response.json();
 
     return {
-      videos: videoRecords,
-      pagination: {
-        currentPage: pageNumber,
-        totalPages,
-        totalVideos,
-        pageSize,
-      },
+      isProcessed: data.status === 4, // 4 means ready in Bunny Stream
+      encodingProgress: data.encodeProgress || 0,
+      status: data.status,
     };
+  } catch (error) {
+    console.error('Error fetching video status:', error);
+    throw new Error('Failed to fetch video status');
   }
-);
-
-export const getVideoById = withErrorHandling(async (videoId: string) => {
-  const [videoRecord] = await buildVideoWithUserQuery().where(
-    eq(videos.videoId, videoId)
-  );
-  return videoRecord;
-});
-
-export const getTranscript = withErrorHandling(async (videoId: string) => {
-  const response = await fetch(
-    `${BUNNY.TRANSCRIPT_URL}/${videoId}/captions/en-auto.vtt`
-  );
-  return response.text();
-});
-
-export const incrementVideoViews = withErrorHandling(
-  async (videoId: string) => {
-    await db
-      .update(videos)
-      .set({ views: sql`${videos.views} + 1`, updatedAt: new Date() })
-      .where(eq(videos.videoId, videoId));
-
-    revalidatePaths([`/video/${videoId}`]);
-    return {};
-  }
-);
-
-export const getAllVideosByUser = withErrorHandling(
-  async (
-    userIdParameter: string,
-    searchQuery: string = "",
-    sortFilter?: string
-  ) => {
-    const currentUserId = (
-      await auth.api.getSession({ headers: await headers() })
-    )?.user.id;
-    const isOwner = userIdParameter === currentUserId;
-
-    const [userInfo] = await db
-      .select({
-        id: user.id,
-        name: user.name,
-        image: user.image,
-        email: user.email,
-      })
-      .from(user)
-      .where(eq(user.id, userIdParameter));
-    if (!userInfo) throw new Error("User not found");
-
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-    const conditions = [
-      eq(videos.userId, userIdParameter),
-      !isOwner && eq(videos.visibility, "public"),
-      searchQuery.trim() && ilike(videos.title, `%${searchQuery}%`),
-    ].filter(Boolean) as any[];
-
-    const userVideos = await buildVideoWithUserQuery()
-      .where(and(...conditions))
-      .orderBy(
-        sortFilter ? getOrderByClause(sortFilter) : desc(videos.createdAt)
-      );
-
-    return { user: userInfo, videos: userVideos, count: userVideos.length };
-  }
-);
-
-export const updateVideoVisibility = withErrorHandling(
-  async (videoId: string, visibility: Visibility) => {
-    await validateWithArcjet(videoId);
-    await db
-      .update(videos)
-      .set({ visibility, updatedAt: new Date() })
-      .where(eq(videos.videoId, videoId));
-
-    revalidatePaths(["/", `/video/${videoId}`]);
-    return {};
-  }
-);
-
-export const getVideoProcessingStatus = withErrorHandling(
-  async (videoId: string) => {
-    const processingInfo = await apiFetch<BunnyVideoResponse>(
-      `${VIDEO_STREAM_BASE_URL}/${BUNNY_LIBRARY_ID}/videos/${videoId}`,
-      { bunnyType: "stream" }
-    );
-
-    return {
-      isProcessed: processingInfo.status === 4,
-      encodingProgress: processingInfo.encodeProgress || 0,
-      status: processingInfo.status,
-    };
-  }
-);
-
-export const deleteVideo = withErrorHandling(
-  async (videoId: string, thumbnailUrl: string) => {
-    await apiFetch(
-      `${VIDEO_STREAM_BASE_URL}/${BUNNY_LIBRARY_ID}/videos/${videoId}`,
-      { method: "DELETE", bunnyType: "stream" }
-    );
-
-    const thumbnailPath = thumbnailUrl.split("thumbnails/")[1];
-    await apiFetch(
-      `${THUMBNAIL_STORAGE_BASE_URL}/thumbnails/${thumbnailPath}`,
-      { method: "DELETE", bunnyType: "storage", expectJson: false }
-    );
-
-    await db.delete(videos).where(eq(videos.videoId, videoId));
-    revalidatePaths(["/", `/video/${videoId}`]);
-    return {};
-  }
-);
+};

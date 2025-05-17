@@ -58,7 +58,7 @@ If you're getting started and need assistance or face any bugs, join our active 
   
 - **[TypeScript](https://www.typescriptlang.org/)** is a superset of JavaScript that adds static typing, providing better tooling, code quality, and error detection for developers, making it ideal for building large-scale applications.
 
-- **[Xata](https://xata.io)** is a serverless PostgreSQL platform offering auto-scaling, zero-downtime schema migrations, real-time branching, and built-in full-text search. It provides a spreadsheet-like UI for intuitive data management, enhancing modern development workflows.
+- **[Supabase](https://supabase.com)** is an open source Firebase alternative that provides a PostgreSQL database, authentication, instant APIs, real-time subscriptions, and storage. It offers a generous free tier and scales with your application needs.
 
 
 ## <a name="features">🔋 Features</a>
@@ -83,7 +83,7 @@ If you're getting started and need assistance or face any bugs, join our active 
 
 👉 **Modern UI/UX**: Clean, responsive design built with Tailwind CSS for a sleek user experience.  
 
-👉 **Database Integration**: Utilize Xata for real-time, scalable database management.  
+👉 **Database Integration**: Utilize Supabase for real-time, scalable PostgreSQL database management with built-in authentication.
 
 👉 **Type-Safe Queries**: Benefit from Drizzle ORM’s type-safe queries for secure and efficient database interactions.  
 
@@ -131,10 +131,9 @@ Create a new file named `.env` in the root of your project and add the following
 # Next.js
 NEXT_PUBLIC_BASE_URL=http://localhost:3000
 
-# [Xata] Configuration used by the CLI and the SDK
-# Make sure your framework/tooling loads this file on startup to have it available for the SDK
-XATA_API_KEY=
-DATABASE_URL_POSTGRES=
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 
 # Google
 GOOGLE_CLIENT_ID=
@@ -154,7 +153,7 @@ ARCJET_API_KEY=
 XATA_API_KEY=
 ```
 
-Replace the placeholder values with your actual credentials. You can obtain these credentials by signing up on: [Better-Auth](https://www.better-auth.com), [Google Cloud](https://console.cloud.google.com), [Bunny.net](https://jsm.dev/snapcast-bunny), [Xata.io](https://xata.io), [Arcjet](https://jsm.dev/snapcast-arcjet).
+Replace the placeholder values with your actual credentials. You can obtain these credentials by signing up on: [Better-Auth](https://www.better-auth.com), [Google Cloud](https://console.cloud.google.com), [Bunny.net](https://jsm.dev/snapcast-bunny), [Supabase](https://supabase.com), [Arcjet](https://jsm.dev/snapcast-arcjet).
 
 **Running the Project**
 
